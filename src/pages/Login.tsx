@@ -1,6 +1,10 @@
 import { User } from '../types';
 import { useState, FormEvent, useEffect } from 'react';
 import { UserPlus, ArrowLeft, Loader2, LogIn } from 'lucide-react';
+// Import Firebase SDK
+import { auth, db } from '../firebase'; 
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -13,19 +17,33 @@ export default function Login({ onLogin }: LoginProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [branding, setBranding] = useState({ name: 'Pemilihan Agen Perubahan', subtitle: 'Pengadilan Agama Prabumulih', logo: '' });
+  
+  // Default branding agar tidak kosong saat fetch API gagal
+  const [branding, setBranding] = useState({ 
+    name: 'Pemilihan Agen Perubahan', 
+    subtitle: 'Pengadilan Agama Prabumulih', 
+    logo: '' 
+  });
 
+  // Ambil data branding dari Firestore (Pengganti /api/settings/general)
   useEffect(() => {
-    fetch('/api/settings/general')
-      .then(res => res.json())
-      .then(data => {
-        setBranding({ 
-          name: data.appName || 'Pemilihan Agen Perubahan', 
-          subtitle: data.appSubtitle || 'Pengadilan Agama Prabumulih',
-          logo: data.appLogoUrl || ''
-        });
-      })
-      .catch(err => console.error('Failed to fetch branding', err));
+    const fetchBranding = async () => {
+      try {
+        const docRef = doc(db, 'settings', 'general');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setBranding({
+            name: data.appName || 'Pemilihan Agen Perubahan',
+            subtitle: data.appSubtitle || 'Pengadilan Agama Prabumulih',
+            logo: data.appLogoUrl || ''
+          });
+        }
+      } catch (err) {
+        console.error('Gagal mengambil branding, menggunakan default.', err);
+      }
+    };
+    fetchBranding();
   }, []);
 
   const handleLoginSuccess = (user: User) => {
@@ -39,21 +57,30 @@ export default function Login({ onLogin }: LoginProps) {
     setError('');
 
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginData)
-      });
+      // Firebase butuh format email. Jika input username Anda 'admin', 
+      // pastikan di Firebase Auth user tersebut terdaftar sebagai 'admin@email.com'
+      // Atau modifikasi input agar menerima email langsung.
+      const email = loginData.username.includes('@') ? loginData.username : `${loginData.username}@enything.com`;
       
-      const data = await res.json();
-      
-      if (res.ok) {
-        handleLoginSuccess(data);
-      } else {
-        setError(data.error || 'Login failed');
-      }
-    } catch (err) {
-      setError('Failed to login');
+      const userCredential = await signInWithEmailAndPassword(auth, email, loginData.password);
+      const firebaseUser = userCredential.user;
+
+      // Ambil data tambahan dari Firestore jika ada
+      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+      const userData = userDoc.data();
+
+      const user: User = {
+        id: firebaseUser.uid,
+        name: userData?.name || firebaseUser.displayName || 'User',
+        username: loginData.username,
+        role: userData?.role || 'user',
+        bio: userData?.bio || ''
+      };
+
+      handleLoginSuccess(user);
+    } catch (err: any) {
+      console.error(err);
+      setError('Username atau Password salah.');
     } finally {
       setLoading(false);
     }
@@ -66,23 +93,28 @@ export default function Login({ onLogin }: LoginProps) {
     setSuccessMsg('');
 
     try {
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+      const email = `${formData.username}@enything.com`;
+      const userCredential = await createUserWithEmailAndPassword(auth, email, formData.password);
+      const user = userCredential.user;
+
+      // Update Profile di Auth
+      await updateProfile(user, { displayName: formData.name });
+
+      // Simpan data tambahan ke Firestore
+      await setDoc(doc(db, 'users', user.uid), {
+        name: formData.name,
+        username: formData.username,
+        bio: formData.bio,
+        role: 'user', // Default role setelah daftar
+        createdAt: new Date().toISOString()
       });
-      
-      const data = await res.json();
-      
-      if (res.ok) {
-        setSuccessMsg(data.message || 'Pendaftaran berhasil. Silakan tunggu persetujuan admin.');
-        setIsRegistering(false);
-        setFormData({ name: '', username: '', password: '', bio: '' });
-      } else {
-        setError(data.error || 'Registration failed');
-      }
-    } catch (err) {
-      setError('Failed to register');
+
+      setSuccessMsg('Pendaftaran berhasil! Silakan masuk.');
+      setIsRegistering(false);
+      setFormData({ name: '', username: '', password: '', bio: '' });
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Gagal mendaftar.');
     } finally {
       setLoading(false);
     }
@@ -130,47 +162,43 @@ export default function Login({ onLogin }: LoginProps) {
               )}
 
               <div>
-                <label htmlFor="name" className="block text-sm font-medium text-slate-700">Nama Lengkap</label>
+                <label className="block text-sm font-medium text-slate-700">Nama Lengkap</label>
                 <input
-                  id="name"
                   type="text"
                   required
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
                 />
               </div>
 
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-slate-700">Username</label>
+                <label className="block text-sm font-medium text-slate-700">Username</label>
                 <input
-                  id="username"
                   type="text"
                   required
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={formData.username}
                   onChange={e => setFormData({...formData, username: e.target.value})}
                 />
               </div>
 
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-700">Password</label>
+                <label className="block text-sm font-medium text-slate-700">Password</label>
                 <input
-                  id="password"
                   type="password"
                   required
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={formData.password}
                   onChange={e => setFormData({...formData, password: e.target.value})}
                 />
               </div>
 
               <div>
-                <label htmlFor="bio" className="block text-sm font-medium text-slate-700">Bio (Opsional)</label>
+                <label className="block text-sm font-medium text-slate-700">Bio (Opsional)</label>
                 <textarea
-                  id="bio"
                   rows={3}
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={formData.bio}
                   onChange={e => setFormData({...formData, bio: e.target.value})}
                 />
@@ -179,9 +207,9 @@ export default function Login({ onLogin }: LoginProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50"
+                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
               >
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Daftar & Masuk'}
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Daftar Sekarang'}
               </button>
             </form>
           ) : (
@@ -201,24 +229,22 @@ export default function Login({ onLogin }: LoginProps) {
               )}
 
               <div>
-                <label htmlFor="login-username" className="block text-sm font-medium text-slate-700">Username</label>
+                <label className="block text-sm font-medium text-slate-700">Username / Email</label>
                 <input
-                  id="login-username"
                   type="text"
                   required
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={loginData.username}
                   onChange={e => setLoginData({...loginData, username: e.target.value})}
                 />
               </div>
 
               <div>
-                <label htmlFor="login-password" className="block text-sm font-medium text-slate-700">Password</label>
+                <label className="block text-sm font-medium text-slate-700">Password</label>
                 <input
-                  id="login-password"
                   type="password"
                   required
-                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
+                  className="mt-1 block w-full border border-slate-300 rounded-md shadow-sm py-2 px-3 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm"
                   value={loginData.password}
                   onChange={e => setLoginData({...loginData, password: e.target.value})}
                 />
@@ -227,7 +253,7 @@ export default function Login({ onLogin }: LoginProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 disabled:opacity-50"
+                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                   <>
@@ -253,7 +279,7 @@ export default function Login({ onLogin }: LoginProps) {
                   setError('');
                   setSuccessMsg('');
                 }}
-                className="w-full flex justify-center items-center py-2 px-4 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+                className="w-full flex justify-center items-center py-2 px-4 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50"
               >
                 <UserPlus className="w-4 h-4 mr-2" />
                 Daftar Baru
