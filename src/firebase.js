@@ -2,17 +2,22 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
+// Konfigurasi Firebase Anda yang sudah aktif
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+  apiKey: "AIzaSyC4JiCzv-rK2jtlgzXC1ZLS45bgyTS6bBA",
+  authDomain: "pwaa-156d4.firebaseapp.com",
+  projectId: "pwaa-156d4",
+  storageBucket: "pwaa-156d4.firebasestorage.app",
+  messagingSenderId: "255936810600",
+  appId: "1:255936810600:web:6e9ed7b1ac4d9cea45f5dd",
+  measurementId: "G-YZPRRPBGF0"
 };
 
+// Inisialisasi Firebase
 const app = initializeApp(firebaseConfig);
+
+// Ekspor layanan yang dibutuhkan aplikasi
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
 export default app;
